@@ -8,7 +8,7 @@ import dashboardRoutes from './routes/dashboardRoutes';
 import analysticsroutes from './routes/analyticsRoutes';
 import path from 'path';
 import settingsRoutes from './routes/settingsRoutes';
-// import productRoutes from './routes/productRoutes'; 
+import cors from 'cors'; // <--- Standard Package
 
 dotenv.config();
 
@@ -25,39 +25,27 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // ==========================================
-// 2. MANUAL CORS FIX
+// 2. CORS (Standard Package Fix)
 // ==========================================
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:3001',
-  'https://mahavir-fashion.vercel.app',
-  'https://mahavir-fashion.vercel.app/',
-];
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const origin = req.headers.origin;
+// We replace the manual headers with this robust package
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
+    'https://mahavir-fashion.vercel.app',
+    'https://mahavir-fashion.vercel.app/' // Handling trailing slash just in case
+  ],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true // Crucial for cookies/headers
+}));
 
-  if (origin && allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
+// ⚡ Handle Preflight (OPTIONS) for all routes automatically
+// This fixes the "Preflight 404" error
+app.options('*', cors());
 
-  res.setHeader(
-    'Access-Control-Allow-Methods',
-    'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-  );
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization'
-  );
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-
-  next();
-});
 // ==========================================
 // 3. BODY PARSER
 // ==========================================
@@ -74,7 +62,6 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/analytics', analysticsroutes);
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/api/settings', settingsRoutes);
-// app.use('/api/products', productRoutes);
 
 // ==========================================
 // 5. GLOBAL ERROR HANDLER
