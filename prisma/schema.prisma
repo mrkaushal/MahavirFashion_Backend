@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              Int             @id @default(autoincrement())
+  mobile          String          @unique
+  email           String          @unique
+  name            String?
+  role            Role            @default(BUYER)
+  companyName     String?
+  gstNumber       String?
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  password        String
+  address         Json?
+  city            String?
+  state           String?
+  loginActivities LoginActivity[]
+  orders          Order[]
+}
+
+model Order {
+  id              String           @id @default(uuid())
+  userId          Int
+  totalAmount     Decimal
+  status          OrderStatus      @default(PENDING)
+  items           Json
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  paymentStatus   String           @default("Pending")
+  readableId      String           @unique
+  user            User             @relation(fields: [userId], references: [id])
+  shippingDetails ShippingDetail[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  category    String
+  price       Decimal
+  stock       Int      @default(0)
+  status      String   @default("Active")
+  specs       Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  images      String[]
+}
+
+model LoginActivity {
+  id        Int      @id @default(autoincrement())
+  email     String
+  role      String?
+  status    String
+  userId    Int?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+}
+
+model ShippingDetail {
+  id            Int      @id @default(autoincrement())
+  orderId       String
+  transportName String?
+  lrNumber      String?
+  fileUrl       String
+  createdAt     DateTime @default(now())
+  order         Order    @relation(fields: [orderId], references: [id])
+}
+
+model GlobalSettings {
+  id               Int      @id @default(1)
+  areOrdersEnabled Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
+}
+
+enum Role {
+  ADMIN
+  BUYER
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  PRINTING
+  FINISHING
+  READY_TRANSPORT
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
