@@ -13,12 +13,12 @@ const dashboardRoutes_1 = __importDefault(require("./routes/dashboardRoutes"));
 const analyticsRoutes_1 = __importDefault(require("./routes/analyticsRoutes"));
 const path_1 = __importDefault(require("path"));
 const settingsRoutes_1 = __importDefault(require("./routes/settingsRoutes"));
-const cors_1 = __importDefault(require("cors")); // <--- Standard Package
+const cors_1 = __importDefault(require("cors"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
 // ==========================================
-// 1. DEBUG LOGGER (Must be first)
+// 1. DEBUG LOGGER
 // ==========================================
 app.use((req, res, next) => {
     console.log(`[INCOMING] ${req.method} ${req.url}`);
@@ -26,9 +26,8 @@ app.use((req, res, next) => {
     next();
 });
 // ==========================================
-// 2. CORS (Standard Package Fix)
+// 2. CORS CONFIGURATION
 // ==========================================
-// We replace the manual headers with this robust package
 app.use((0, cors_1.default)({
     origin: [
         'http://localhost:3000',
@@ -36,15 +35,14 @@ app.use((0, cors_1.default)({
         'http://127.0.0.1:3000',
         'http://127.0.0.1:3001',
         'https://mahavir-fashion.vercel.app',
-        'https://mahavir-fashion.vercel.app/' // Handling trailing slash just in case
+        'https://mahavir-fashion.vercel.app/'
     ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true // Crucial for cookies/headers
+    credentials: true
 }));
-// ⚡ Handle Preflight (OPTIONS) for all routes automatically
-// This fixes the "Preflight 404" error
-app.options('*', (0, cors_1.default)());
+// ⚡ FIX: Use Regex /.*/ instead of string '*' to prevent path-to-regexp crash
+app.options(/.*/, (0, cors_1.default)());
 // ==========================================
 // 3. BODY PARSER
 // ==========================================
@@ -63,7 +61,6 @@ app.use('/api/settings', settingsRoutes_1.default);
 // ==========================================
 // 5. GLOBAL ERROR HANDLER
 // ==========================================
-// Catches crashes inside controllers (like DB errors)
 app.use((err, req, res, next) => {
     console.error('[SERVER ERROR]', err);
     res.status(500).json({ error: 'Internal Server Error', details: err.message });
