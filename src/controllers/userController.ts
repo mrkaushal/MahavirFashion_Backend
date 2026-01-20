@@ -32,7 +32,8 @@ export const getBuyers = async (req: Request, res: Response): Promise<void> => {
 // 2. Toggle Status (Block/Unblock)
 export const toggleUserStatus = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
+    // ⚡ FIX: Explicit cast
+    const { id } = req.params as { id: string };
     
     const user = await prisma.user.findUnique({ where: { id: parseInt(id) } });
     if (!user) {
@@ -51,13 +52,14 @@ export const toggleUserStatus = async (req: Request, res: Response): Promise<voi
   }
 };
 
-// 3. Update User (Admin Edit)
+// 3. Update User (FIXED)
 export const updateUser = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
+    // ⚡ FIX: Explicit cast
+    const { id } = req.params as { id: string };
+    
     const { name, companyName, gstNumber, mobile, email, city, state, address, password } = req.body;
 
-    // Prepare update object
     let updateData: any = {
       name,
       companyName,
@@ -69,7 +71,6 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
       address: address || {}
     };
 
-    // Only update password if a new one is provided
     if (password && password.trim() !== "") {
       const hashedPassword = await bcrypt.hash(password, 10);
       updateData.password = hashedPassword;

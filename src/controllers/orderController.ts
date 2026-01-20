@@ -73,7 +73,8 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
 // 3. Update Status
 export const updateOrderStatus = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    // ⚡ FIX: Cast params to ensure 'id' is a string
+    const { id } = req.params as { id: string }; 
     const { status } = req.body;
 
     const updatedOrder = await prisma.order.update({
@@ -88,44 +89,34 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
   }
 };
 
-// 4. Add/Update Shipping Details (Fixes Duplicates & Handles Files)
+// 4. Add/Update Shipping Details (FIXED)
 export const addShippingDetails = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
+    // ⚡ FIX: Cast params here too
+    const { id } = req.params as { id: string };
 
-    // A. Parse Text Data
-    // Since we use FormData, 'entries' comes as a JSON string.
     const entriesRaw = req.body.entries;
     if (!entriesRaw) {
         res.status(400).json({ error: "No entries provided" });
         return;
     }
     const entries = JSON.parse(entriesRaw);
-
-    // B. Get Files from Multer
     const files = (req.files as Express.Multer.File[]) || [];
 
-    // C. Perform Atomic Transaction
     await prisma.$transaction(async (tx) => {
       
-      // ⚡ STEP 1: DELETE OLD ENTRIES
-      // This logic fixes the "duplicate entries" bug. We wipe the slate clean
-      // for this specific order and re-save the latest state.
+      // STEP 1: DELETE OLD ENTRIES
       await tx.shippingDetail.deleteMany({
-        where: { orderId: id }
+        where: { orderId: id } // 'id' is now guaranteed string
       });
 
-      // ⚡ STEP 2: CREATE NEW ENTRIES
+      // STEP 2: CREATE NEW ENTRIES
       for (const [index, entry] of entries.entries()) {
-        
-        let finalFileUrl = entry.fileUrl || ""; // Keep existing URL if valid
+        let finalFileUrl = entry.fileUrl || ""; 
 
-        // Check if a NEW file was uploaded for this index (file_0, file_1, etc.)
         const uploadedFile = files.find(f => f.fieldname === `file_${index}`);
 
         if (uploadedFile) {
-           // Construct Local URL (Fastest Performance)
-           // http://localhost:5000/uploads/1748239-invoice.pdf
            finalFileUrl = `${req.protocol}://${req.get('host')}/uploads/${uploadedFile.filename}`;
         }
 
@@ -139,8 +130,7 @@ export const addShippingDetails = async (req: Request, res: Response): Promise<v
         });
       }
 
-      // ⚡ STEP 3: AUTO-UPDATE STATUS
-      // If shipping is added, order is logically "IN_TRANSIT" (unless already delivered)
+      // STEP 3: AUTO-UPDATE STATUS
       const currentOrder = await tx.order.findUnique({ where: { id } });
       if (currentOrder && currentOrder.status !== 'DELIVERED' && currentOrder.status !== 'CANCELLED') {
           await tx.order.update({

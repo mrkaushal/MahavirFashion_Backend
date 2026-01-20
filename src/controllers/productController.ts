@@ -46,11 +46,12 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
 // 3. Update Product (Updated for images array)
 export const updateProduct = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    // ⚡ FIX: Explicit cast
+    const { id } = req.params as { id: string };
     const { title, price, stock, category, description, specs, status, images } = req.body;
 
     const updated = await prisma.product.update({
-      where: { id: parseInt(id) },
+      where: { id: parseInt(id) }, // parseInt is now happy
       data: {
         title,
         price: parseFloat(price),
@@ -68,10 +69,12 @@ export const updateProduct = async (req: Request, res: Response) => {
   }
 };
 
-// 4. Delete Product (Keep same)
+// 4. Delete Product (FIXED)
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    // ⚡ FIX: Explicit cast
+    const { id } = req.params as { id: string };
+    
     await prisma.product.delete({ where: { id: parseInt(id) } });
     res.json({ message: "Product deleted" });
   } catch (error) {
