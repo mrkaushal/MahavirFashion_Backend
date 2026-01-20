@@ -32,6 +32,7 @@ const allowedOrigins = [
   'http://localhost:3001',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
+  'https://mahavir-fashion.vercel.app',
 ];
 app.use((req: Request, res: Response, next: NextFunction) => {
   const origin = req.headers.origin;
