@@ -1,6 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+
 // Ensure upload directory exists
 const uploadDir = 'uploads/';
 if (!fs.existsSync(uploadDir)){
@@ -18,17 +19,21 @@ const storage = multer.diskStorage({
   }
 });
 
-// Validate file type
+// ⚡ FIX: Allow Images AND PDFs
 const fileFilter = (req: any, file: any, cb: any) => {
-  if (file.mimetype.startsWith('image/')) {
+  // Check for Image OR PDF
+  if (
+    file.mimetype.startsWith('image/') || 
+    file.mimetype === 'application/pdf'
+  ) {
     cb(null, true);
   } else {
-    cb(new Error('Not an image! Please upload only images.'), false);
+    cb(new Error('Invalid file type! Please upload only Images or PDFs.'), false);
   }
 };
 
 export const upload = multer({ 
   storage: storage,
   fileFilter: fileFilter,
-  limits: { fileSize: 1024 * 1024 * 5 } // 5MB limit
+  limits: { fileSize: 1024 * 1024 * 10 } // Increased to 10MB (PDFs can be larger)
 });

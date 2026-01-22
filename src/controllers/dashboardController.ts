@@ -1,58 +1,73 @@
 import { Request, Response } from 'express';
+import NodeCache from 'node-cache'; // ⚡ Install this: npm install node-cache
 import prisma from '../config/prisma';
+
+// ⚡ PERFORMANCE: Cache dashboard data for 60 seconds
+// This prevents recalculating the graph/trends on every single page refresh.
+const dashboardCache = new NodeCache({ stdTTL: 60 });
+const CACHE_KEY = 'dashboard_stats';
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
+    // 1. ⚡ CHECK CACHE FIRST (Instant Return)
+    if (dashboardCache.has(CACHE_KEY)) {
+      // console.log("Serving Dashboard from Cache 🚀"); // Uncomment to test speed
+      return res.json(dashboardCache.get(CACHE_KEY));
+    }
+
     const now = new Date();
     const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     
-    // 1. Parallel Queries
+    // 2. ⚡ PARALLEL DATABASE QUERIES (All in one go)
     const [
       totalOrders,
       activeCustomers,
       pendingOrders,
+      totalRevenueRaw, // Moved inside transaction
       recentOrdersRaw,
       thisMonthOrders,
       lastMonthOrders,
       graphOrdersRaw,
-      // NEW: Fetch Real Activity Logs
       recentLogsRaw 
     ] = await prisma.$transaction([
-      // ... (Keep existing count queries same) ...
+      // 1. Basic Counts
       prisma.order.count(),
       prisma.user.count({ where: { role: 'BUYER', isActive: true } }),
       prisma.order.count({ where: { status: 'PENDING' } }),
       
-      // Recent Orders
+      // 2. Total Revenue (Moved inside for speed)
+      prisma.order.aggregate({ _sum: { totalAmount: true } }),
+
+      // 3. Recent Orders Table
       prisma.order.findMany({
         take: 5,
         orderBy: { createdAt: 'desc' },
         include: { user: { select: { companyName: true, name: true } } }
       }),
 
-      // This Month
+      // 4. Trend Data (This Month)
       prisma.order.aggregate({
         where: { createdAt: { gte: startOfThisMonth } },
         _sum: { totalAmount: true },
         _count: { id: true }
       }),
 
-      // Last Month
+      // 5. Trend Data (Last Month)
       prisma.order.aggregate({
         where: { createdAt: { gte: startOfLastMonth, lt: startOfThisMonth } },
         _sum: { totalAmount: true },
         _count: { id: true }
       }),
 
-      // ⚡ UPDATED: Analyze last 500 orders for Graph
+      // 6. Graph Data (Heavy Query)
       prisma.order.findMany({
         take: 500, 
         select: { items: true },
         orderBy: { createdAt: 'desc' }
       }),
 
-      // ⚡ NEW: Recent Activity Logs (Limit 6 for dashboard card)
+      // 7. Activity Logs
       prisma.loginActivity.findMany({
         take: 6,
         orderBy: { createdAt: 'desc' },
@@ -60,7 +75,9 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       })
     ]);
 
-    // ... (Keep existing trend calculation logic) ...
+    // --- 3. CALCULATIONS (Fast Synchronous Logic) ---
+
+    // Trends
     const calculateTrend = (current: number, previous: number) => {
       if (previous === 0) return current > 0 ? '+100%' : '0%';
       const percent = ((current - previous) / previous) * 100;
@@ -75,7 +92,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     const lastMonthCount = lastMonthOrders._count.id;
     const ordersTrend = calculateTrend(thisMonthCount, lastMonthCount);
 
-    // --- Graph Data ---
+    // Graph Logic (Category Map)
     const categoryMap: Record<string, number> = {};
     graphOrdersRaw.forEach(order => {
       const items = order.items as any[];
@@ -92,11 +109,9 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
 
-    // Total Revenue
-    const totalRevenueRaw = await prisma.order.aggregate({ _sum: { totalAmount: true }});
+    // Formatted Data
     const totalRevenue = Number(totalRevenueRaw._sum.totalAmount || 0);
 
-    // Format Recent Orders
     const recentOrders = recentOrdersRaw.map(order => ({
       id: order.readableId,
       customer: order.user.companyName || order.user.name,
@@ -108,24 +123,28 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       date: order.createdAt
     }));
 
-    // ⚡ FORMAT ACTIVITIES
     const activities = recentLogsRaw.map(log => ({
       id: log.id,
       user: log.user?.name || log.email,
       action: log.status === 'SUCCESS' ? `Logged in as ${log.role}` : 'Failed login attempt',
       time: log.createdAt,
-      status: log.status // SUCCESS or FAILED
+      status: log.status
     }));
 
-    res.json({
+    const responseData = {
       stats: { totalRevenue, totalOrders, activeCustomers, pendingOrders, revenueTrend, ordersTrend },
       graphData,
       recentOrders,
-      activities // Sending this to frontend
-    });
+      activities
+    };
+
+    // 4. ⚡ SAVE TO CACHE
+    dashboardCache.set(CACHE_KEY, responseData);
+
+    res.json(responseData);
 
   } catch (error) {
-    console.error(error);
+    console.error("Dashboard Error:", error);
     res.status(500).json({ error: "Failed to fetch dashboard data" });
   }
 };
