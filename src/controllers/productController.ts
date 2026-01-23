@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import NodeCache from 'node-cache'; // ⚡ NEW: Install 'npm install node-cache'
+import NodeCache from 'node-cache';
 import prisma from '../config/prisma';
 
 // ⚡ PERFORMANCE: Cache setup (TTL = 5 minutes)
@@ -52,16 +52,22 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
 
     // Parse specs safely
     let parsedSpecs = {};
-    try { parsedSpecs = JSON.parse(specs); } catch(e) { parsedSpecs = specs; }
+    try { 
+        // Ensure specs is treated as a string before parsing
+        parsedSpecs = JSON.parse(specs as string); 
+    } catch(e) { 
+        parsedSpecs = specs; 
+    }
 
     const newProduct = await prisma.product.create({
       data: {
-        title,
-        price: parseFloat(price),
-        stock: parseInt(stock),
-        category,
-        description,
-        status,
+        title: title as string,
+        // FIX: Cast to string before parsing
+        price: parseFloat(price as string),
+        stock: parseInt(stock as string),
+        category: category as string,
+        description: description as string,
+        status: status as string,
         specs: parsedSpecs,
         images: imageUrls
       }
@@ -80,7 +86,8 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
 // 3. Update Product (⚡ FIX + CLEANUP)
 export const updateProduct = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
+    // FIX: Cast params to ensure 'id' is a string
+    const { id } = req.params as { id: string };
     const files = (req.files as Express.Multer.File[]) || [];
     const { title, price, stock, category, description, specs, status, existingImages } = req.body;
 
@@ -90,7 +97,7 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
     // 2. Normalize Existing Images (Handle single/multiple/empty)
     let currentImages: string[] = [];
     if (existingImages) {
-        currentImages = Array.isArray(existingImages) ? existingImages : [existingImages];
+        currentImages = Array.isArray(existingImages) ? existingImages : [existingImages as string];
     }
 
     // 3. ⚡ CLEANUP: Find images that were removed and delete them from disk
@@ -110,17 +117,22 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
 
     // 5. Parse Specs
     let parsedSpecs = {};
-    try { parsedSpecs = JSON.parse(specs); } catch(e) { parsedSpecs = specs; }
+    try { 
+        parsedSpecs = JSON.parse(specs as string); 
+    } catch(e) { 
+        parsedSpecs = specs; 
+    }
 
     const updated = await prisma.product.update({
       where: { id: parseInt(id) },
       data: {
-        title,
-        price: parseFloat(price),
-        stock: parseInt(stock),
-        category,
-        description,
-        status,
+        title: title as string,
+        // FIX: Cast to string before parsing
+        price: parseFloat(price as string),
+        stock: parseInt(stock as string),
+        category: category as string,
+        description: description as string,
+        status: status as string,
         specs: parsedSpecs,
         images: finalImages
       }
@@ -139,7 +151,8 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
 // 4. Delete Product (⚡ CLEANUP)
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    // FIX: Cast params to ensure 'id' is a string
+    const { id } = req.params as { id: string };
     
     // Find product first to get images
     const product = await prisma.product.findUnique({ where: { id: parseInt(id) } });
