@@ -64,11 +64,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/analytics', analysticsroutes);
-app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
-  maxAge: '30d', // Cache files for 30 days
-  immutable: true, // Tells browser the file content will never change
-  lastModified: true // checks if file changed on server
-}));
+
 app.use('/api/settings', settingsRoutes);
 
 // ==========================================

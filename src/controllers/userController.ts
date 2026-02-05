@@ -139,3 +139,48 @@ export const createBuyer = async (req: Request, res: Response): Promise<void> =>
         res.status(500).json({ error: "Failed to create buyer" });
     }
 }
+export const getUserProfile = async (req: Request, res: Response) => {
+  try {
+    // ⚡ Get ID from Token (Middleware)
+    const userId = (req as any).user.id; 
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        mobile: true,
+        companyName: true,
+        gstNumber: true,
+        address: true,
+        role: true
+      }
+    });
+
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    res.json(user);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch profile" });
+  }
+};
+
+// 6. Update Logged-In User Profile
+export const updateUserProfile = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id; 
+    const { name, mobile } = req.body; // Only allow editing Name & Mobile
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { name, mobile }
+    });
+
+    res.json(updatedUser);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+};
