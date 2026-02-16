@@ -32,46 +32,75 @@ const deleteFileFromCloud = async (fileUrl: string) => {
 // 1. Get All Products (⚡ NOW RETURNS SIGNED URLs)
 export const getProducts = async (req: Request, res: Response) => {
   try {
-    // ⚡ Check Cache
-    if (productCache.has(CACHE_KEY_PRODUCTS)) {
-       // Ideally, check if cached URLs are expired. For now, we serve cache.
-       // If users see 401s after 1 hour, lower the cache TTL.
-       return res.json(productCache.get(CACHE_KEY_PRODUCTS));
+    // ⚡ Role Check: Default to 'BUYER' logic if no user found (e.g. public guest)
+    const user = (req as any).user;
+    const isAdmin = user?.role === 'ADMIN';
+
+    // ⚡ Distinct Cache Keys
+    // Buyers only get 'ACTIVE' products. Admins get EVERYTHING.
+    const CACHE_KEY = isAdmin ? 'products_admin' : 'products_buyer';
+
+    // Check Cache
+    if (productCache.has(CACHE_KEY)) {
+       return res.json(productCache.get(CACHE_KEY));
     }
 
+    // ⚡ Filter Logic
+    // If Admin -> No filter (Show all)
+    // If Buyer/Guest -> Status MUST be 'ACTIVE'
+    const whereClause = isAdmin ? {} : { status: 'ACTIVE' };
+
+    // A. Fetch Products
     const products = await prisma.product.findMany({
+      where: whereClause,
       orderBy: { createdAt: 'desc' }
     });
 
-    // ⚡ GENERATE SIGNED URLs (Crucial for Private Buckets)
-    const productsWithSignedUrls = await Promise.all(products.map(async (product) => {
-        
-        // Handle case where images might be null/undefined
-        const rawImages = product.images || [];
+    // B. Fetch All Orders (To aggregate reviews)
+    const orders = await prisma.order.findMany({
+      where: { status: { not: 'CANCELLED' } },
+      select: { items: true }
+    });
 
+    // C. Combine Products + Signed URLs + Reviews
+    const productsWithDetails = await Promise.all(products.map(async (product) => {
+        
+        // 1. Sign Images
+        const rawImages = product.images || [];
         const signedImages = await Promise.all(
             rawImages.map(async (imgUrl) => {
+                if (imgUrl.startsWith('http') && !imgUrl.includes('backblazeb2')) return imgUrl;
                 const signed = await getSignedFileUrl(imgUrl);
                 return signed || imgUrl;
             })
         );
 
+        // 2. Aggregate Reviews
+        const productReviews: any[] = [];
+        orders.forEach(order => {
+            const items = order.items as any[];
+            const matchedItems = items.filter((i: any) => i.id === product.id && i.review);
+            matchedItems.forEach((i: any) => {
+                productReviews.push({ rating: i.review.rating });
+            });
+        });
+
         return {
             ...product,
-            images: signedImages
+            images: signedImages,
+            reviews: productReviews
         };
     }));
 
     // Save to Cache
-    productCache.set(CACHE_KEY_PRODUCTS, productsWithSignedUrls);
+    productCache.set(CACHE_KEY, productsWithDetails);
     
-    res.json(productsWithSignedUrls);
+    res.json(productsWithDetails);
   } catch (error) {
     console.error("Product Fetch Error:", error);
     res.status(500).json({ error: "Failed to fetch products" });
   }
 };
-
 // 2. Create Product
 export const createProduct = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -181,7 +210,85 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
     res.status(500).json({ error: "Failed to update product" });
   }
 };
+export const getProductById = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params as { id: string };
+    const productId = parseInt(id);
+    
+    // ⚡ Role Check
+    const user = (req as any).user;
+    const isAdmin = user?.role === 'ADMIN';
 
+    if (isNaN(productId)) {
+        return res.status(400).json({ error: "Invalid product ID" });
+    }
+
+    // 1. Fetch Product
+    const product = await prisma.product.findUnique({ where: { id: productId } });
+    
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    // ⚡ VISIBILITY CHECK
+    // If user is NOT Admin AND product is NOT Active -> Hide it
+    if (!isAdmin && product.status !== 'ACTIVE') {
+        // Return 404 so buyers don't even know the product exists
+        return res.status(404).json({ error: "Product not found or unavailable" });
+    }
+
+    // 2. Fetch ALL Orders (except Cancelled) to find reviews
+    const ordersWithProduct = await prisma.order.findMany({
+      where: { 
+        status: { not: 'CANCELLED' } 
+      },
+      select: { 
+        items: true, 
+        createdAt: true,
+        user: { select: { companyName: true, name: true } }
+      }
+    });
+
+    const reviews: any[] = [];
+
+    ordersWithProduct.forEach(order => {
+        const items = order.items as any[];
+        
+        // Find items that match THIS product ID AND have a review
+        const matchedItems = items.filter((i: any) => i.id === productId && i.review);
+        
+        matchedItems.forEach((i: any) => {
+            reviews.push({
+                id: order.createdAt.getTime() + Math.random(), 
+                companyName: order.user?.companyName || order.user?.name || "Anonymous",
+                rating: i.review.rating,
+                comment: i.review.comment,
+                date: new Date(i.review.createdAt).toLocaleDateString('en-IN', {
+                    day: 'numeric', month: 'short', year: 'numeric'
+                })
+            });
+        });
+    });
+
+    // 3. Sign Images
+    const rawImages = product.images || [];
+    const signedImages = await Promise.all(
+        rawImages.map(async (imgUrl) => {
+            if (imgUrl.startsWith('http') && !imgUrl.includes('backblazeb2')) return imgUrl;
+            const signed = await getSignedFileUrl(imgUrl);
+            return signed || imgUrl;
+        })
+    );
+
+    res.json({
+        ...product,
+        images: signedImages,
+        reviews: reviews 
+    });
+
+  } catch (error) {
+    console.error("Get Product Error:", error);
+    res.status(500).json({ error: "Failed to fetch product details" });
+  }
+};
 // 4. Delete Product (⚡ CLOUD CLEANUP)
 export const deleteProduct = async (req: Request, res: Response) => {
   try {

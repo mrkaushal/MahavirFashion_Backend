@@ -9,9 +9,7 @@ const CACHE_KEY = 'dashboard_stats';
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
-    // 1. ⚡ CHECK CACHE FIRST (Instant Return)
     if (dashboardCache.has(CACHE_KEY)) {
-      // console.log("Serving Dashboard from Cache 🚀"); // Uncomment to test speed
       return res.json(dashboardCache.get(CACHE_KEY));
     }
 
@@ -19,55 +17,48 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     
-    // 2. ⚡ PARALLEL DATABASE QUERIES (All in one go)
     const [
       totalOrders,
       activeCustomers,
       pendingOrders,
-      totalRevenueRaw, // Moved inside transaction
+      // totalRevenueRaw, <--- REMOVED
       recentOrdersRaw,
       thisMonthOrders,
       lastMonthOrders,
       graphOrdersRaw,
       recentLogsRaw 
     ] = await prisma.$transaction([
-      // 1. Basic Counts
       prisma.order.count(),
       prisma.user.count({ where: { role: 'BUYER', isActive: true } }),
       prisma.order.count({ where: { status: 'PENDING' } }),
       
-      // 2. Total Revenue (Moved inside for speed)
-      prisma.order.aggregate({ _sum: { totalAmount: true } }),
+      // REMOVED REVENUE AGGREGATION QUERY
+      // prisma.order.aggregate({ _sum: { totalAmount: true } }), 
 
-      // 3. Recent Orders Table
       prisma.order.findMany({
         take: 5,
         orderBy: { createdAt: 'desc' },
         include: { user: { select: { companyName: true, name: true } } }
       }),
 
-      // 4. Trend Data (This Month)
+      // Keep trends for Orders, but ignore revenue sums inside them if needed, 
+      // or just keep them for "Orders Trend" calculation but don't display revenue.
       prisma.order.aggregate({
         where: { createdAt: { gte: startOfThisMonth } },
-        _sum: { totalAmount: true },
-        _count: { id: true }
+        _count: { id: true } 
       }),
 
-      // 5. Trend Data (Last Month)
       prisma.order.aggregate({
         where: { createdAt: { gte: startOfLastMonth, lt: startOfThisMonth } },
-        _sum: { totalAmount: true },
         _count: { id: true }
       }),
 
-      // 6. Graph Data (Heavy Query)
       prisma.order.findMany({
         take: 500, 
         select: { items: true },
         orderBy: { createdAt: 'desc' }
       }),
 
-      // 7. Activity Logs
       prisma.loginActivity.findMany({
         take: 6,
         orderBy: { createdAt: 'desc' },
@@ -75,24 +66,21 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       })
     ]);
 
-    // --- 3. CALCULATIONS (Fast Synchronous Logic) ---
-
-    // Trends
+    // Trends Calculation (Orders Only)
     const calculateTrend = (current: number, previous: number) => {
       if (previous === 0) return current > 0 ? '+100%' : '0%';
       const percent = ((current - previous) / previous) * 100;
       return `${percent > 0 ? '+' : ''}${percent.toFixed(1)}%`;
     };
 
-    const thisMonthRev = Number(thisMonthOrders._sum.totalAmount || 0);
-    const lastMonthRev = Number(lastMonthOrders._sum.totalAmount || 0);
-    const revenueTrend = calculateTrend(thisMonthRev, lastMonthRev);
+    // Revenue Trend is now hardcoded to 0% since we removed it
+    const revenueTrend = "0%"; 
 
     const thisMonthCount = thisMonthOrders._count.id;
     const lastMonthCount = lastMonthOrders._count.id;
     const ordersTrend = calculateTrend(thisMonthCount, lastMonthCount);
 
-    // Graph Logic (Category Map)
+    // Graph Logic (Same as before)
     const categoryMap: Record<string, number> = {};
     graphOrdersRaw.forEach(order => {
       const items = order.items as any[];
@@ -110,9 +98,10 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       .slice(0, 5);
 
     // Formatted Data
-    const totalRevenue = Number(totalRevenueRaw._sum.totalAmount || 0);
+    const totalRevenue = 0; // <--- HARDCODED 0
 
     const recentOrders = recentOrdersRaw.map(order => ({
+      // ... map logic same as before ...
       id: order.readableId,
       customer: order.user.companyName || order.user.name,
       product: Array.isArray(order.items) && order.items.length > 0 
@@ -124,6 +113,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     }));
 
     const activities = recentLogsRaw.map(log => ({
+       // ... map logic same as before ...
       id: log.id,
       user: log.user?.name || log.email,
       action: log.status === 'SUCCESS' ? `Logged in as ${log.role}` : 'Failed login attempt',
@@ -138,9 +128,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       activities
     };
 
-    // 4. ⚡ SAVE TO CACHE
     dashboardCache.set(CACHE_KEY, responseData);
-
     res.json(responseData);
 
   } catch (error) {

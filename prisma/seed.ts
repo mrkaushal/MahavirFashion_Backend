@@ -6,7 +6,7 @@ const prisma = new PrismaClient()
 
 async function main() {
   const adminEmail = 'admin@mahavirfashion.com'
-  const adminPassword = 'admin123' // Change this to your desired password
+  const adminPassword = '123456' // Change this to your desired password
   const adminMobile = '918851607038' // Change this to YOUR real mobile (91 + number)
 
   // Hash the password
@@ -18,6 +18,7 @@ async function main() {
     update: {
       password: hashedPassword,
       mobile: adminMobile,
+      companyName: 'Mahavir Fashion HQ',
       role: 'ADMIN',
       isActive: true
     },
@@ -25,6 +26,7 @@ async function main() {
       email: adminEmail,
       password: hashedPassword,
       mobile: adminMobile,
+      companyName: 'Mahavir Fashion HQ',
       role: 'ADMIN',
       name: 'Super Admin',
       isActive: true

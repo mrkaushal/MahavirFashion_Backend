@@ -9,7 +9,7 @@ export const getAnalytics = async (req: Request, res: Response) => {
     const [
       totalUsers,
       ordersToday,
-      revenueRaw,
+     
       logsRaw
     ] = await prisma.$transaction([
       // 1. Total Users
@@ -21,10 +21,7 @@ export const getAnalytics = async (req: Request, res: Response) => {
       }),
 
       // 3. Revenue (This Month)
-      prisma.order.aggregate({
-        _sum: { totalAmount: true }
-      }),
-
+     
       // 4. Recent Logs (Last 20)
       prisma.loginActivity.findMany({
         take: 20,
@@ -34,7 +31,7 @@ export const getAnalytics = async (req: Request, res: Response) => {
     ]);
 
     // Format Data
-    const revenue = revenueRaw._sum.totalAmount ? Number(revenueRaw._sum.totalAmount) : 0;
+    const revenue = 0;
     
     const logs = logsRaw.map(log => ({
       id: log.id,

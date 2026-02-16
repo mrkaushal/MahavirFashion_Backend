@@ -66,7 +66,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/analytics', analysticsroutes);
 
 app.use('/api/settings', settingsRoutes);
-
+app.use('/api/categories', require('./routes/categoryRoutes').default); // Importing category routes
 // ==========================================
 // 5. GLOBAL ERROR HANDLER
 // ==========================================

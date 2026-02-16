@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getOrders, createOrder, updateOrderStatus, addShippingDetails } from '../controllers/orderController';
+import { getOrders, createOrder, updateOrderStatus, addShippingDetails, bulkUpdateItemStatus, addItemReview } from '../controllers/orderController';
 import { protect, adminOnly } from '../middleware/authMiddleware';
 import { upload } from '../middleware/uploadMiddleware'; 
 
@@ -14,5 +14,6 @@ router.post('/', protect, createOrder);
 // Buyers should NEVER be able to update status or shipping
 router.patch('/:id/status', protect, adminOnly, updateOrderStatus);
 router.post('/:id/shipping', protect, adminOnly, upload.any(), addShippingDetails);
-
+router.patch('/bulk-status', protect, adminOnly, bulkUpdateItemStatus);
+router.post('/:id/review', protect, addItemReview);
 export default router;

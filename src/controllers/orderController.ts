@@ -3,6 +3,7 @@ import NodeCache from 'node-cache'; // ⚡ Caching
 import prisma from '../config/prisma';
 import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { s3, BUCKET_NAME, getSignedFileUrl } from '../config/s3Client'; // ⚡ Added getSignedFileUrl
+import { OrderStatus } from '@prisma/client';
 
 // ⚡ PERFORMANCE: Initialize Cache
 // stdTTL: 60 seconds (Data stays in memory for 1 minute)
@@ -153,14 +154,48 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
 export const updateOrderStatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params as { id: string }; 
-    const { status } = req.body;
+    const { status, itemIndex } = req.body; 
 
+    // 1. Fetch current order
+    const order = await prisma.order.findUnique({ where: { id } });
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    // 2. Parse Items
+    const items = order.items as any[];
+    
+    // 3. Update Specific Item Status
+    if (typeof itemIndex === 'number' && items[itemIndex]) {
+        items[itemIndex].status = status;
+    }
+
+    // 4. Calculate Global Status (Auto-derived)
+    const allStatuses = items.map(i => i.status || 'PENDING');
+    
+    // ⚡ FIX: Initialize with Enum Type
+    let globalStatus: OrderStatus = OrderStatus.PROCESSING; 
+
+    if (allStatuses.every(s => s === 'PENDING')) {
+        globalStatus = OrderStatus.PENDING;
+    } else if (allStatuses.every(s => s === 'DELIVERED')) {
+        globalStatus = OrderStatus.DELIVERED;
+    } else if (allStatuses.every(s => s === 'CANCELLED')) {
+        globalStatus = OrderStatus.CANCELLED;
+    } else if (allStatuses.some(s => s === 'IN_TRANSIT')) {
+        globalStatus = OrderStatus.IN_TRANSIT;
+    } else if (allStatuses.some(s => s === 'READY_TRANSPORT')) {
+        globalStatus = OrderStatus.READY_TRANSPORT;
+    }
+    
+    // 5. Update DB
     const updatedOrder = await prisma.order.update({
       where: { id },
-      data: { status }
+      data: { 
+        items: items, 
+        status: globalStatus // ⚡ Now strictly typed as OrderStatus
+      }
     });
 
-    // ⚡ PERFORMANCE: Invalidate Cache
+    // Invalidate Cache
     orderCache.del(CACHE_KEY_ORDERS);
 
     res.json(updatedOrder);
@@ -169,7 +204,6 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to update status" });
   }
 };
-
 // 4. Add/Update Shipping Details (⚡ OPTIMIZED FOR CLOUD)
 export const addShippingDetails = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -258,5 +292,129 @@ export const addShippingDetails = async (req: Request, res: Response): Promise<v
   } catch (error) {
     console.error("Shipping Save Error:", error);
     res.status(500).json({ error: "Failed to save shipping details" });
+  }
+};
+export const bulkUpdateItemStatus = async (req: Request, res: Response) => {
+  try {
+    const { updates, newStatus } = req.body; 
+    // updates structure: [{ orderId: "uuid", itemIndex: 0 }, ...]
+
+    if (!Array.isArray(updates) || updates.length === 0 || !newStatus) {
+        return res.status(400).json({ error: "Invalid data provided" });
+    }
+
+    // ⚡ Optimization: Group updates by Order ID to minimize DB queries
+    // Map: { "order_id": [index1, index2, ...] }
+    const updatesByOrder: Record<string, number[]> = {};
+    
+    updates.forEach((u: any) => {
+        if (!updatesByOrder[u.orderId]) updatesByOrder[u.orderId] = [];
+        updatesByOrder[u.orderId].push(u.itemIndex);
+    });
+
+    // ⚡ Transactional Update
+    await prisma.$transaction(async (tx) => {
+        const orderIds = Object.keys(updatesByOrder);
+
+        // Process each affected order
+        await Promise.all(orderIds.map(async (orderId) => {
+            const indicesToUpdate = updatesByOrder[orderId];
+
+            // 1. Fetch current items
+            const order = await tx.order.findUnique({ 
+                where: { id: orderId },
+                select: { items: true, status: true } 
+            });
+
+            if (!order) return;
+
+            const items = order.items as any[];
+            let hasChanges = false;
+
+            // 2. Update specific items
+            indicesToUpdate.forEach(idx => {
+                if (items[idx]) {
+                    items[idx].status = newStatus;
+                    hasChanges = true;
+                }
+            });
+
+            if (!hasChanges) return;
+
+            // 3. Recalculate Global Status (Same logic as single update)
+            const allStatuses = items.map(i => i.status || 'PENDING');
+            let globalStatus: OrderStatus = OrderStatus.PROCESSING;
+
+            if (allStatuses.every(s => s === 'PENDING')) globalStatus = OrderStatus.PENDING;
+            else if (allStatuses.every(s => s === 'DELIVERED')) globalStatus = OrderStatus.DELIVERED;
+            else if (allStatuses.every(s => s === 'CANCELLED')) globalStatus = OrderStatus.CANCELLED;
+            else if (allStatuses.some(s => s === 'IN_TRANSIT')) globalStatus = OrderStatus.IN_TRANSIT;
+            else if (allStatuses.some(s => s === 'READY_TRANSPORT')) globalStatus = OrderStatus.READY_TRANSPORT;
+
+            // 4. Save
+            await tx.order.update({
+                where: { id: orderId },
+                data: { items, status: globalStatus }
+            });
+        }));
+    });
+
+    // Invalidate Cache
+    orderCache.del(CACHE_KEY_ORDERS);
+
+    res.json({ message: "Bulk update successful" });
+
+  } catch (error) {
+    console.error("Bulk Update Error:", error);
+    res.status(500).json({ error: "Failed to perform bulk update" });
+  }
+};
+export const addItemReview = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params as { id: string }; 
+    const { itemIndex, rating, comment } = req.body;
+    const userId = (req as any).user.id;
+
+    // 1. Fetch Order & Verify Ownership
+    const order = await prisma.order.findUnique({ where: { id } });
+    
+    if (!order || order.userId !== userId) {
+        return res.status(403).json({ error: "Unauthorized or Order not found" });
+    }
+
+    const items = order.items as any[];
+
+    // 2. Validate Item Exists
+    if (!items[itemIndex]) return res.status(404).json({ error: "Item not found" });
+    
+    // 3. Validate Status (Must be Delivered)
+    const itemStatus = items[itemIndex].status || 'PENDING';
+    if (itemStatus !== 'DELIVERED') {
+        return res.status(400).json({ error: "Can only review delivered items." });
+    }
+
+    // 4. ⚡ STRICT CHECK: Prevent multiple reviews
+    if (items[itemIndex].review) {
+        return res.status(400).json({ error: "You have already reviewed this item." });
+    }
+
+    // 5. Add Review
+    items[itemIndex].review = {
+        rating: Math.min(5, Math.max(1, rating)), // Ensure 1-5
+        comment: comment || "",
+        createdAt: new Date().toISOString()
+    };
+
+    // 6. Save
+    await prisma.order.update({
+        where: { id },
+        data: { items }
+    });
+
+    res.json({ message: "Review submitted successfully" });
+
+  } catch (error) {
+    console.error("Review Error:", error);
+    res.status(500).json({ error: "Failed to submit review" });
   }
 };
