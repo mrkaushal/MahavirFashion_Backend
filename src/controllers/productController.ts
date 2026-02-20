@@ -8,7 +8,6 @@ import { s3, BUCKET_NAME, getSignedFileUrl } from '../config/s3Client'; // ⚡ I
 // We set it to 50 mins because Signed URLs last 60 mins. 
 // This ensures users always get a fresh, working link.
 const productCache = new NodeCache({ stdTTL: 3000, checkperiod: 600 }); 
-const CACHE_KEY_PRODUCTS = 'all_products';
 
 // --- HELPER: Delete File from Cloud (Backblaze B2) ---
 const deleteFileFromCloud = async (fileUrl: string) => {
@@ -29,7 +28,7 @@ const deleteFileFromCloud = async (fileUrl: string) => {
   }
 };
 
-// 1. Get All Products (⚡ NOW RETURNS SIGNED URLs)
+// 1. Get All Products (⚡ NOW RETURNS SIGNED URLs + ROLE FILTER)
 export const getProducts = async (req: Request, res: Response) => {
   try {
     // ⚡ Role Check: Default to 'BUYER' logic if no user found (e.g. public guest)
@@ -101,6 +100,7 @@ export const getProducts = async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to fetch products" });
   }
 };
+
 // 2. Create Product
 export const createProduct = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -131,8 +131,9 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
       }
     });
 
-    // ⚡ Clear Cache so new product appears immediately
-    productCache.del(CACHE_KEY_PRODUCTS);
+    // ⚡ Clear Cache so new product appears immediately for BOTH roles
+    productCache.del('products_admin');
+    productCache.del('products_buyer');
 
     res.status(201).json(newProduct);
   } catch (error) {
@@ -164,19 +165,8 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
     });
 
     if (oldProduct && oldProduct.images) {
-        // Compare DB images vs Kept images
-        // Note: We need to match based on the key, as the signed URL changes.
-        // Simplified approach: If the exact string isn't in 'currentImages', delete it.
-        // *CAUTION*: If frontend sends back Signed URLs, this matching might fail.
-        // Ideally, frontend should send back the original "Key" or unsigned URL.
-        // However, for now, we assume standard flow.
-        
-        // Since we serve Signed URLs, we can't easily match them back to stored private URLs
-        // without complex logic. To prevent accidental deletion of valid files,
-        // we skip the Cloud Deletion on Update for now unless we implement permanent ID matching.
-        // Ideally, you'd store Image ID + URL separately.
-        
-        // SAFE MODE: We just update the DB list. Old files stay in bucket (safer than accidental delete).
+        // Safe Mode: We skip aggressive cloud deletion here to avoid accidental data loss 
+        // if signed URLs are passed back. We rely on DB updates.
     }
 
     // 4. Combine
@@ -203,13 +193,18 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
       }
     });
 
-    productCache.del(CACHE_KEY_PRODUCTS);
+    // ⚡ Clear Cache so updates appear immediately for BOTH roles
+    productCache.del('products_admin');
+    productCache.del('products_buyer');
+
     res.json(updated);
   } catch (error) {
     console.error("Update Error:", error);
     res.status(500).json({ error: "Failed to update product" });
   }
 };
+
+// 4. Get Product By ID (⚡ ROLE & VISIBILITY CHECK)
 export const getProductById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params as { id: string };
@@ -289,7 +284,8 @@ export const getProductById = async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to fetch product details" });
   }
 };
-// 4. Delete Product (⚡ CLOUD CLEANUP)
+
+// 5. Delete Product (⚡ CLOUD CLEANUP & CACHE CLEAR)
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
     const { id } = req.params as { id: string };
@@ -303,7 +299,9 @@ export const deleteProduct = async (req: Request, res: Response) => {
 
     await prisma.product.delete({ where: { id: parseInt(id) } });
     
-    productCache.del(CACHE_KEY_PRODUCTS);
+    // ⚡ Clear Cache so updates appear immediately for BOTH roles
+    productCache.del('products_admin');
+    productCache.del('products_buyer');
 
     res.json({ message: "Product deleted" });
   } catch (error) {
