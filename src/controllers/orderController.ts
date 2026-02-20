@@ -4,7 +4,7 @@ import prisma from '../config/prisma';
 import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { s3, BUCKET_NAME, getSignedFileUrl } from '../config/s3Client'; // ⚡ Added getSignedFileUrl
 import { OrderStatus } from '@prisma/client';
-
+import { productCache } from './productController';
 // ⚡ PERFORMANCE: Initialize Cache
 // stdTTL: 60 seconds (Data stays in memory for 1 minute)
 const orderCache = new NodeCache({ stdTTL: 60, checkperiod: 120 });
@@ -375,7 +375,6 @@ export const addItemReview = async (req: Request, res: Response) => {
     const { itemIndex, rating, comment } = req.body;
     const userId = (req as any).user.id;
 
-    // 1. Fetch Order & Verify Ownership
     const order = await prisma.order.findUnique({ where: { id } });
     
     if (!order || order.userId !== userId) {
@@ -384,32 +383,35 @@ export const addItemReview = async (req: Request, res: Response) => {
 
     const items = order.items as any[];
 
-    // 2. Validate Item Exists
     if (!items[itemIndex]) return res.status(404).json({ error: "Item not found" });
     
-    // 3. Validate Status (Must be Delivered)
     const itemStatus = items[itemIndex].status || 'PENDING';
     if (itemStatus !== 'DELIVERED') {
         return res.status(400).json({ error: "Can only review delivered items." });
     }
 
-    // 4. ⚡ STRICT CHECK: Prevent multiple reviews
     if (items[itemIndex].review) {
         return res.status(400).json({ error: "You have already reviewed this item." });
     }
 
-    // 5. Add Review
     items[itemIndex].review = {
-        rating: Math.min(5, Math.max(1, rating)), // Ensure 1-5
+        rating: Math.min(5, Math.max(1, rating)), 
         comment: comment || "",
         createdAt: new Date().toISOString()
     };
 
-    // 6. Save
+    // Save to DB
     await prisma.order.update({
         where: { id },
         data: { items }
     });
+
+    // ⚡ CLEAR PRODUCT CACHE SO NEW REVIEWS SHOW INSTANTLY ON HOMEPAGE
+    if (productCache) {
+        productCache.del('products_admin');
+        productCache.del('products_buyer');
+        console.log(`[CACHE] Cleared product cache after new review for order ${id}`);
+    }
 
     res.json({ message: "Review submitted successfully" });
 

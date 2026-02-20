@@ -7,7 +7,7 @@ import { s3, BUCKET_NAME, getSignedFileUrl } from '../config/s3Client'; // ⚡ I
 // ⚡ PERFORMANCE: Cache setup (TTL = 50 minutes)
 // We set it to 50 mins because Signed URLs last 60 mins. 
 // This ensures users always get a fresh, working link.
-const productCache = new NodeCache({ stdTTL: 3000, checkperiod: 600 }); 
+export const productCache = new NodeCache({ stdTTL: 3000, checkperiod: 600 }); 
 
 // --- HELPER: Delete File from Cloud (Backblaze B2) ---
 const deleteFileFromCloud = async (fileUrl: string) => {
@@ -31,40 +31,33 @@ const deleteFileFromCloud = async (fileUrl: string) => {
 // 1. Get All Products (⚡ NOW RETURNS SIGNED URLs + ROLE FILTER)
 export const getProducts = async (req: Request, res: Response) => {
   try {
-    // ⚡ Role Check: Default to 'BUYER' logic if no user found (e.g. public guest)
     const user = (req as any).user;
     const isAdmin = user?.role === 'ADMIN';
 
-    // ⚡ Distinct Cache Keys
-    // Buyers only get 'ACTIVE' products. Admins get EVERYTHING.
     const CACHE_KEY = isAdmin ? 'products_admin' : 'products_buyer';
 
-    // Check Cache
     if (productCache.has(CACHE_KEY)) {
        return res.json(productCache.get(CACHE_KEY));
     }
 
-    // ⚡ Filter Logic
-    // If Admin -> No filter (Show all)
-    // If Buyer/Guest -> Status MUST be 'ACTIVE'
     const whereClause = isAdmin ? {} : { status: 'ACTIVE' };
 
-    // A. Fetch Products
     const products = await prisma.product.findMany({
       where: whereClause,
       orderBy: { createdAt: 'desc' }
     });
 
-    // B. Fetch All Orders (To aggregate reviews)
+    // ⚡ FIX: Fetch user details and createdAt for the reviews
     const orders = await prisma.order.findMany({
       where: { status: { not: 'CANCELLED' } },
-      select: { items: true }
+      select: { 
+        items: true,
+        createdAt: true,
+        user: { select: { companyName: true, name: true } } 
+      }
     });
 
-    // C. Combine Products + Signed URLs + Reviews
     const productsWithDetails = await Promise.all(products.map(async (product) => {
-        
-        // 1. Sign Images
         const rawImages = product.images || [];
         const signedImages = await Promise.all(
             rawImages.map(async (imgUrl) => {
@@ -74,13 +67,22 @@ export const getProducts = async (req: Request, res: Response) => {
             })
         );
 
-        // 2. Aggregate Reviews
+        // ⚡ FIX: Map the FULL review object, not just the rating
         const productReviews: any[] = [];
         orders.forEach(order => {
             const items = order.items as any[];
             const matchedItems = items.filter((i: any) => i.id === product.id && i.review);
             matchedItems.forEach((i: any) => {
-                productReviews.push({ rating: i.review.rating });
+                productReviews.push({ 
+                    id: order.createdAt.getTime() + Math.random(), 
+                    companyName: order.user?.companyName || order.user?.name || "Anonymous",
+                    rating: i.review.rating,
+                    comment: i.review.comment || "",
+                    // Fallback to order createdAt if review createdAt doesn't exist
+                    date: new Date(i.review.createdAt || order.createdAt).toLocaleDateString('en-IN', {
+                        day: 'numeric', month: 'short', year: 'numeric'
+                    })
+                });
             });
         });
 
@@ -91,7 +93,6 @@ export const getProducts = async (req: Request, res: Response) => {
         };
     }));
 
-    // Save to Cache
     productCache.set(CACHE_KEY, productsWithDetails);
     
     res.json(productsWithDetails);
