@@ -5,7 +5,7 @@ const TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID;
 
 // ⚡ Logic: Use Real Service ONLY if keys exist
 const USE_REAL_MSG91 = !!(AUTH_KEY && TEMPLATE_ID); 
-
+    
 console.log(`\n🔌 [MSG91_INIT] Service Loaded.`);
 console.log(`🔌 [MSG91_INIT] Mode: ${USE_REAL_MSG91 ? '✅ PRODUCTION (Real SMS)' : '⚠️ DEV (Simulated)'}`);
 if (!USE_REAL_MSG91) {
