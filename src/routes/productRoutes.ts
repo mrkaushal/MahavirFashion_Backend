@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getProducts, createProduct, updateProduct, deleteProduct, getProductById } from '../controllers/productController';
+import { getProducts, createProduct, updateProduct, deleteProduct, getProductById, uploadImageBatch } from '../controllers/productController';
 import { upload } from '../middleware/uploadMiddleware';
 import { protect, adminOnly } from '../middleware/authMiddleware';
 
@@ -12,7 +12,7 @@ router.post('/', protect, upload.array('images', 5), createProduct);
 
 // ⚡ FIX: Added 'upload' middleware here. This populates req.body!
 router.put('/:id', protect, upload.array('images', 5), updateProduct);
-
+router.post('/upload-batch', upload.array('images', 5), uploadImageBatch);
 router.delete('/:id', protect, deleteProduct);
 
 export default router;

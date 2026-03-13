@@ -69,13 +69,12 @@ model LoginActivity {
 }
 
 model ShippingDetail {
-  id            Int      @id @default(autoincrement())
-  orderId       String
-  transportName String?
-  lrNumber      String?
-  fileUrl       String
-  createdAt     DateTime @default(now())
-  order         Order    @relation(fields: [orderId], references: [id])
+  id             Int      @id @default(autoincrement())
+  orderId        String
+  merchantNumber String   // ⚡ Replaced transportName and lrNumber
+  fileUrl        String?  // ⚡ Made optional in case there is no bill yet
+  createdAt      DateTime @default(now())
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 
 model GlobalSettings {

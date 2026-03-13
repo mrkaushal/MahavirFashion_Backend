@@ -3,9 +3,7 @@ import axios from 'axios';
 const AUTH_KEY = process.env.MSG91_AUTH_KEY;
 const TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID;
 
-// ⚡ Logic: HARDCODED TO FALSE. 
-// This forces the app to use '123456' for everyone, even in production.
-const USE_REAL_MSG91 = false; // !!(AUTH_KEY && TEMPLATE_ID); 
+const USE_REAL_MSG91 = false; 
     
 console.log(`\n🔌 [MSG91_INIT] Service Loaded.`);
 console.log(`🔌 [MSG91_INIT] Mode: ${USE_REAL_MSG91 ? '✅ PRODUCTION (Real SMS)' : '⚠️ DEV (Simulated for ALL)'}`);

@@ -5,15 +5,12 @@ import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { s3, BUCKET_NAME, getSignedFileUrl } from '../config/s3Client'; // ⚡ Import Helper
 
 // ⚡ PERFORMANCE: Cache setup (TTL = 50 minutes)
-// We set it to 50 mins because Signed URLs last 60 mins. 
-// This ensures users always get a fresh, working link.
 export const productCache = new NodeCache({ stdTTL: 3000, checkperiod: 600 }); 
 
 // --- HELPER: Delete File from Cloud (Backblaze B2) ---
 const deleteFileFromCloud = async (fileUrl: string) => {
   if (!fileUrl) return;
   try {
-    // Extract the "Key" (filename) from the full URL
     const fileKey = fileUrl.split('/').pop(); 
     
     if (fileKey) {
@@ -47,7 +44,6 @@ export const getProducts = async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    // ⚡ FIX: Fetch user details and createdAt for the reviews
     const orders = await prisma.order.findMany({
       where: { status: { not: 'CANCELLED' } },
       select: { 
@@ -67,7 +63,6 @@ export const getProducts = async (req: Request, res: Response) => {
             })
         );
 
-        // ⚡ FIX: Map the FULL review object, not just the rating
         const productReviews: any[] = [];
         orders.forEach(order => {
             const items = order.items as any[];
@@ -78,7 +73,6 @@ export const getProducts = async (req: Request, res: Response) => {
                     companyName: order.user?.companyName || order.user?.name || "Anonymous",
                     rating: i.review.rating,
                     comment: i.review.comment || "",
-                    // Fallback to order createdAt if review createdAt doesn't exist
                     date: new Date(i.review.createdAt || order.createdAt).toLocaleDateString('en-IN', {
                         day: 'numeric', month: 'short', year: 'numeric'
                     })
@@ -102,19 +96,40 @@ export const getProducts = async (req: Request, res: Response) => {
   }
 };
 
-// 2. Create Product
-export const createProduct = async (req: Request, res: Response): Promise<void> => {
+// ⚡ NEW: 1.5 Batch Upload Endpoint (Saves your 1GB RAM)
+export const uploadImageBatch = async (req: Request, res: Response): Promise<void> => {
   try {
     const files = (req.files as any[]) || [];
-    const { title, price, stock, category, description, specs, status } = req.body;
+    if (files.length === 0) {
+        res.status(400).json({ error: "No images were received in this batch." });
+        return;
+    }
     
-    // ⚡ Store the PERMANENT (Private) URL in DB
-    // The .location property comes from multer-s3
-    const imageUrls = files.map(file => file.location); 
+    // Extract the permanent Backblaze B2 URLs returned by multer-s3
+    const uploadedUrls = files.map(file => file.location);
+    
+    res.status(200).json({ urls: uploadedUrls });
+  } catch (error) {
+    console.error("Batch Upload Error:", error);
+    res.status(500).json({ error: "The server failed to upload a batch of images. Please try again." });
+  }
+};
+
+// 2. Create Product (⚡ Now expects URL array from frontend instead of files)
+export const createProduct = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { title, price, stock, category, description, specs, status, images } = req.body;
+    
+    const imageUrls = Array.isArray(images) ? images : [];
+    
+    if (imageUrls.length > 30) {
+        res.status(400).json({ error: "You can only save a maximum of 30 images per product." });
+        return;
+    }
 
     let parsedSpecs = {};
     try { 
-        parsedSpecs = JSON.parse(specs as string); 
+        parsedSpecs = typeof specs === 'string' ? JSON.parse(specs) : specs;
     } catch(e) { 
         parsedSpecs = specs; 
     }
@@ -122,24 +137,27 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
     const newProduct = await prisma.product.create({
       data: {
         title: title as string,
-        price: parseFloat(price as string),
-        stock: parseInt(stock as string),
+        price: parseFloat(price as string) || 0,
+        stock: parseInt(stock as string) || 0,
         category: category as string,
         description: description as string,
         status: status as string,
         specs: parsedSpecs,
-        images: imageUrls
+        images: imageUrls // ⚡ Using the URLs sent from the frontend batch upload
       }
     });
 
-    // ⚡ Clear Cache so new product appears immediately for BOTH roles
     productCache.del('products_admin');
     productCache.del('products_buyer');
 
     res.status(201).json(newProduct);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to create product" });
+  } catch (error: any) {
+    console.error("Create Product Error:", error);
+    if (error.code === 'P2002') {
+        res.status(400).json({ error: "A product with this title already exists." });
+    } else {
+        res.status(500).json({ error: "Failed to save the product to the database. Please check your inputs." });
+    }
   }
 };
 
@@ -147,19 +165,25 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
 export const updateProduct = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params as { id: string };
-    const files = (req.files as any[]) || []; 
-    const { title, price, stock, category, description, specs, status, existingImages } = req.body;
+    const { title, price, stock, category, description, specs, status, existingImages, newImages } = req.body;
 
-    // 1. Get New URLs
-    const newImageUrls = files.map(file => file.location);
-
-    // 2. Handle Existing Images (Convert string/array to array)
     let currentImages: string[] = [];
     if (existingImages) {
         currentImages = Array.isArray(existingImages) ? existingImages : [existingImages as string];
     }
+    
+    let uploadedUrls: string[] = [];
+    if (newImages) {
+        uploadedUrls = Array.isArray(newImages) ? newImages : [newImages as string];
+    }
 
-    // 3. ⚡ CLEANUP: Find images removed from UI and delete from Cloud
+    const finalImages = [...currentImages, ...uploadedUrls];
+
+    if (finalImages.length > 30) {
+        res.status(400).json({ error: "A product cannot have more than 30 images in total." });
+        return;
+    }
+
     const oldProduct = await prisma.product.findUnique({ 
         where: { id: parseInt(id) },
         select: { images: true }
@@ -170,12 +194,9 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
         // if signed URLs are passed back. We rely on DB updates.
     }
 
-    // 4. Combine
-    const finalImages = [...currentImages, ...newImageUrls];
-
     let parsedSpecs = {};
     try { 
-        parsedSpecs = JSON.parse(specs as string); 
+        parsedSpecs = typeof specs === 'string' ? JSON.parse(specs) : specs;
     } catch(e) { 
         parsedSpecs = specs; 
     }
@@ -184,8 +205,8 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
       where: { id: parseInt(id) },
       data: {
         title: title as string,
-        price: parseFloat(price as string),
-        stock: parseInt(stock as string),
+        price: parseFloat(price as string) || 0,
+        stock: parseInt(stock as string) || 0,
         category: category as string,
         description: description as string,
         status: status as string,
@@ -194,14 +215,13 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
       }
     });
 
-    // ⚡ Clear Cache so updates appear immediately for BOTH roles
     productCache.del('products_admin');
     productCache.del('products_buyer');
 
     res.json(updated);
   } catch (error) {
     console.error("Update Error:", error);
-    res.status(500).json({ error: "Failed to update product" });
+    res.status(500).json({ error: "Failed to update the product. Please try again." });
   }
 };
 
@@ -211,7 +231,6 @@ export const getProductById = async (req: Request, res: Response) => {
     const { id } = req.params as { id: string };
     const productId = parseInt(id);
     
-    // ⚡ Role Check
     const user = (req as any).user;
     const isAdmin = user?.role === 'ADMIN';
 
@@ -219,19 +238,14 @@ export const getProductById = async (req: Request, res: Response) => {
         return res.status(400).json({ error: "Invalid product ID" });
     }
 
-    // 1. Fetch Product
     const product = await prisma.product.findUnique({ where: { id: productId } });
     
     if (!product) return res.status(404).json({ error: "Product not found" });
 
-    // ⚡ VISIBILITY CHECK
-    // If user is NOT Admin AND product is NOT Active -> Hide it
     if (!isAdmin && product.status !== 'ACTIVE') {
-        // Return 404 so buyers don't even know the product exists
         return res.status(404).json({ error: "Product not found or unavailable" });
     }
 
-    // 2. Fetch ALL Orders (except Cancelled) to find reviews
     const ordersWithProduct = await prisma.order.findMany({
       where: { 
         status: { not: 'CANCELLED' } 
@@ -247,8 +261,6 @@ export const getProductById = async (req: Request, res: Response) => {
 
     ordersWithProduct.forEach(order => {
         const items = order.items as any[];
-        
-        // Find items that match THIS product ID AND have a review
         const matchedItems = items.filter((i: any) => i.id === productId && i.review);
         
         matchedItems.forEach((i: any) => {
@@ -264,7 +276,6 @@ export const getProductById = async (req: Request, res: Response) => {
         });
     });
 
-    // 3. Sign Images
     const rawImages = product.images || [];
     const signedImages = await Promise.all(
         rawImages.map(async (imgUrl) => {
@@ -294,13 +305,11 @@ export const deleteProduct = async (req: Request, res: Response) => {
     const product = await prisma.product.findUnique({ where: { id: parseInt(id) } });
     
     if (product && product.images) {
-        // Safe to delete all images since the whole product is gone
         product.images.forEach(img => deleteFileFromCloud(img));
     }
 
     await prisma.product.delete({ where: { id: parseInt(id) } });
     
-    // ⚡ Clear Cache so updates appear immediately for BOTH roles
     productCache.del('products_admin');
     productCache.del('products_buyer');
 
