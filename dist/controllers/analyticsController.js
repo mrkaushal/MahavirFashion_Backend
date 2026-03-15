@@ -18,7 +18,7 @@ const getAnalytics = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     try {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const [totalUsers, ordersToday, revenueRaw, logsRaw] = yield prisma_1.default.$transaction([
+        const [totalUsers, ordersToday, logsRaw] = yield prisma_1.default.$transaction([
             // 1. Total Users
             prisma_1.default.user.count(),
             // 2. Orders Today
@@ -26,9 +26,6 @@ const getAnalytics = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 where: { createdAt: { gte: today } }
             }),
             // 3. Revenue (This Month)
-            prisma_1.default.order.aggregate({
-                _sum: { totalAmount: true }
-            }),
             // 4. Recent Logs (Last 20)
             prisma_1.default.loginActivity.findMany({
                 take: 20,
@@ -37,7 +34,7 @@ const getAnalytics = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             })
         ]);
         // Format Data
-        const revenue = revenueRaw._sum.totalAmount ? Number(revenueRaw._sum.totalAmount) : 0;
+        const revenue = 0;
         const logs = logsRaw.map(log => {
             var _a, _b;
             return ({

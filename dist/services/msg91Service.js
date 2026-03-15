@@ -16,52 +16,62 @@ exports.verifyOtp = exports.sendOtp = void 0;
 const axios_1 = __importDefault(require("axios"));
 const AUTH_KEY = process.env.MSG91_AUTH_KEY;
 const TEMPLATE_ID = process.env.MSG91_TEMPLATE_ID;
-// Toggle this to TRUE when client gives real keys
 const USE_REAL_MSG91 = false;
-const sendOtp = (mobile) => __awaiter(void 0, void 0, void 0, function* () {
-    // 1. DEV MODE: Bypass actual API call
-    if (!USE_REAL_MSG91) {
-        console.log(`[DEV MODE] 🟡 Skipping MSG91 API Call`);
-        console.log(`[DEV MODE] 🔑 OTP for ${mobile} is: 123456`); // <--- Magic OTP
-        // Simulate MSG91 success response
-        return {
-            type: "success",
-            request_id: "dev-mode-request-id",
-            message: "OTP sent successfully (Simulated)"
-        };
+console.log(`\n🔌 [MSG91_INIT] Service Loaded.`);
+console.log(`🔌 [MSG91_INIT] Mode: ${USE_REAL_MSG91 ? '✅ PRODUCTION (Real SMS)' : '⚠️ DEV (Simulated for ALL)'}`);
+// --- Helper: Format Mobile (Adds '91' if missing) ---
+const formatMobile = (mobile) => {
+    const original = mobile;
+    const cleaned = mobile.replace(/\D/g, '');
+    let formatted = cleaned;
+    if (cleaned.length === 10)
+        formatted = `91${cleaned}`;
+    if (cleaned.startsWith('0') && cleaned.length === 11)
+        formatted = `91${cleaned.substring(1)}`;
+    if (original !== formatted) {
+        console.log(`🛠️ [MSG91_UTIL] Formatted Mobile: ${original} -> ${formatted}`);
     }
-    // 2. REAL MODE (Keep this code for later)
+    return formatted;
+};
+const sendOtp = (mobile) => __awaiter(void 0, void 0, void 0, function* () {
+    const formattedMobile = formatMobile(mobile);
+    console.log(`\n📤 [MSG91_SEND] Request to send OTP to: ${formattedMobile}`);
+    // 1. DEV MODE: Since USE_REAL_MSG91 is false, it will always hit this block.
+    if (!USE_REAL_MSG91) {
+        console.log(`🟡 [MSG91_DEV] Real SMS is disabled globally.`);
+        console.log(`🔑 [MSG91_DEV] SIMULATED OTP for ${formattedMobile} is: 123456`);
+        return { type: "success", message: "OTP sent (Simulated)" };
+    }
+    // 2. REAL MODE (Currently unreachable)
     const url = 'https://control.msg91.com/api/v5/otp';
     try {
-        const response = yield axios_1.default.post(url, {}, {
-            params: { template_id: TEMPLATE_ID, mobile: mobile, authkey: AUTH_KEY }
+        const response = yield axios_1.default.post(url, null, {
+            params: { template_id: TEMPLATE_ID, mobile: formattedMobile, authkey: AUTH_KEY }
         });
+        if (response.data.type === 'error')
+            throw new Error(response.data.message);
         return response.data;
     }
     catch (error) {
-        console.error(`[MSG91] 🔴 Request Failed`, error.message);
-        throw new Error("Failed to send OTP");
+        throw new Error("Failed to send OTP via MSG91");
     }
 });
 exports.sendOtp = sendOtp;
 const verifyOtp = (mobile, otp) => __awaiter(void 0, void 0, void 0, function* () {
-    // 1. DEV MODE: Verify Magic OTP
+    const formattedMobile = formatMobile(mobile);
+    console.log(`\n🔍 [MSG91_VERIFY] Verifying OTP for: ${formattedMobile}`);
+    // 1. DEV MODE: Will always check against '123456'
     if (!USE_REAL_MSG91) {
-        console.log(`[DEV MODE] 🟡 Verifying OTP: ${otp}`);
-        if (otp === '123456') {
-            console.log(`[DEV MODE] 🟢 OTP Verified!`);
-            return true;
-        }
-        else {
-            console.log(`[DEV MODE] 🔴 Invalid OTP`);
-            return false;
-        }
+        console.log(`🟡 [MSG91_DEV] Checking against Magic OTP '123456'`);
+        const isValid = otp === '123456';
+        console.log(isValid ? `✅ [MSG91_DEV] Matched!` : `❌ [MSG91_DEV] Mismatch! Provided: ${otp}`);
+        return isValid;
     }
-    // 2. REAL MODE
+    // 2. REAL MODE (Currently unreachable)
     const url = 'https://control.msg91.com/api/v5/otp/verify';
     try {
         const response = yield axios_1.default.get(url, {
-            params: { otp: otp, mobile: mobile, authkey: AUTH_KEY }
+            params: { otp: otp, mobile: formattedMobile, authkey: AUTH_KEY }
         });
         if (response.data.type === 'error')
             return false;

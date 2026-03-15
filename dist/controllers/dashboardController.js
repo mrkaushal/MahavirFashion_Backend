@@ -13,65 +13,67 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getDashboardStats = void 0;
+const node_cache_1 = __importDefault(require("node-cache")); // ⚡ Install this: npm install node-cache
 const prisma_1 = __importDefault(require("../config/prisma"));
+// ⚡ PERFORMANCE: Cache dashboard data for 60 seconds
+// This prevents recalculating the graph/trends on every single page refresh.
+const dashboardCache = new node_cache_1.default({ stdTTL: 60 });
+const CACHE_KEY = 'dashboard_stats';
 const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        if (dashboardCache.has(CACHE_KEY)) {
+            return res.json(dashboardCache.get(CACHE_KEY));
+        }
         const now = new Date();
         const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
         const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        // 1. Parallel Queries
-        const [totalOrders, activeCustomers, pendingOrders, recentOrdersRaw, thisMonthOrders, lastMonthOrders, graphOrdersRaw, 
-        // NEW: Fetch Real Activity Logs
-        recentLogsRaw] = yield prisma_1.default.$transaction([
-            // ... (Keep existing count queries same) ...
+        const [totalOrders, activeCustomers, pendingOrders, 
+        // totalRevenueRaw, <--- REMOVED
+        recentOrdersRaw, thisMonthOrders, lastMonthOrders, graphOrdersRaw, recentLogsRaw] = yield prisma_1.default.$transaction([
             prisma_1.default.order.count(),
             prisma_1.default.user.count({ where: { role: 'BUYER', isActive: true } }),
             prisma_1.default.order.count({ where: { status: 'PENDING' } }),
-            // Recent Orders
+            // REMOVED REVENUE AGGREGATION QUERY
+            // prisma.order.aggregate({ _sum: { totalAmount: true } }), 
             prisma_1.default.order.findMany({
                 take: 5,
                 orderBy: { createdAt: 'desc' },
                 include: { user: { select: { companyName: true, name: true } } }
             }),
-            // This Month
+            // Keep trends for Orders, but ignore revenue sums inside them if needed, 
+            // or just keep them for "Orders Trend" calculation but don't display revenue.
             prisma_1.default.order.aggregate({
                 where: { createdAt: { gte: startOfThisMonth } },
-                _sum: { totalAmount: true },
                 _count: { id: true }
             }),
-            // Last Month
             prisma_1.default.order.aggregate({
                 where: { createdAt: { gte: startOfLastMonth, lt: startOfThisMonth } },
-                _sum: { totalAmount: true },
                 _count: { id: true }
             }),
-            // ⚡ UPDATED: Analyze last 500 orders for Graph
             prisma_1.default.order.findMany({
                 take: 500,
                 select: { items: true },
                 orderBy: { createdAt: 'desc' }
             }),
-            // ⚡ NEW: Recent Activity Logs (Limit 6 for dashboard card)
             prisma_1.default.loginActivity.findMany({
                 take: 6,
                 orderBy: { createdAt: 'desc' },
                 include: { user: { select: { name: true, companyName: true } } }
             })
         ]);
-        // ... (Keep existing trend calculation logic) ...
+        // Trends Calculation (Orders Only)
         const calculateTrend = (current, previous) => {
             if (previous === 0)
                 return current > 0 ? '+100%' : '0%';
             const percent = ((current - previous) / previous) * 100;
             return `${percent > 0 ? '+' : ''}${percent.toFixed(1)}%`;
         };
-        const thisMonthRev = Number(thisMonthOrders._sum.totalAmount || 0);
-        const lastMonthRev = Number(lastMonthOrders._sum.totalAmount || 0);
-        const revenueTrend = calculateTrend(thisMonthRev, lastMonthRev);
+        // Revenue Trend is now hardcoded to 0% since we removed it
+        const revenueTrend = "0%";
         const thisMonthCount = thisMonthOrders._count.id;
         const lastMonthCount = lastMonthOrders._count.id;
         const ordersTrend = calculateTrend(thisMonthCount, lastMonthCount);
-        // --- Graph Data ---
+        // Graph Logic (Same as before)
         const categoryMap = {};
         graphOrdersRaw.forEach(order => {
             const items = order.items;
@@ -86,11 +88,10 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
             .map(([label, value]) => ({ label, value }))
             .sort((a, b) => b.value - a.value)
             .slice(0, 5);
-        // Total Revenue
-        const totalRevenueRaw = yield prisma_1.default.order.aggregate({ _sum: { totalAmount: true } });
-        const totalRevenue = Number(totalRevenueRaw._sum.totalAmount || 0);
-        // Format Recent Orders
+        // Formatted Data
+        const totalRevenue = 0; // <--- HARDCODED 0
         const recentOrders = recentOrdersRaw.map(order => ({
+            // ... map logic same as before ...
             id: order.readableId,
             customer: order.user.companyName || order.user.name,
             product: Array.isArray(order.items) && order.items.length > 0
@@ -100,26 +101,28 @@ const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, functi
             status: order.status,
             date: order.createdAt
         }));
-        // ⚡ FORMAT ACTIVITIES
         const activities = recentLogsRaw.map(log => {
             var _a;
             return ({
+                // ... map logic same as before ...
                 id: log.id,
                 user: ((_a = log.user) === null || _a === void 0 ? void 0 : _a.name) || log.email,
                 action: log.status === 'SUCCESS' ? `Logged in as ${log.role}` : 'Failed login attempt',
                 time: log.createdAt,
-                status: log.status // SUCCESS or FAILED
+                status: log.status
             });
         });
-        res.json({
+        const responseData = {
             stats: { totalRevenue, totalOrders, activeCustomers, pendingOrders, revenueTrend, ordersTrend },
             graphData,
             recentOrders,
-            activities // Sending this to frontend
-        });
+            activities
+        };
+        dashboardCache.set(CACHE_KEY, responseData);
+        res.json(responseData);
     }
     catch (error) {
-        console.error(error);
+        console.error("Dashboard Error:", error);
         res.status(500).json({ error: "Failed to fetch dashboard data" });
     }
 });

@@ -210,7 +210,9 @@ export const addShippingDetails = async (req: Request, res: Response): Promise<v
         .map(d => d.fileUrl)
         .filter(url => url && !keptUrls.includes(url));
 
-      filesToDelete.forEach(url => deleteFileFromCloud(url));
+      filesToDelete
+  .filter((url): url is string => Boolean(url)) 
+  .forEach(url => deleteFileFromCloud(url));
 
       await tx.shippingDetail.deleteMany({
         where: { orderId: id }
