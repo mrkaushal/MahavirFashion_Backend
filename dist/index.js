@@ -50,7 +50,8 @@ app.options(/.*/, (0, cors_1.default)(corsOptions));
 // ==========================================
 // 3. BODY PARSER
 // ==========================================
-app.use(express_1.default.json());
+app.use(express_1.default.json({ limit: '50mb' }));
+app.use(express_1.default.urlencoded({ limit: '50mb', extended: true }));
 // ==========================================
 // 4. ROUTES
 // ==========================================
