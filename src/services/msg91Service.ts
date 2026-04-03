@@ -32,7 +32,7 @@ export const sendOtp = async (mobile: string) => {
   // 1. DEV MODE: Since USE_REAL_MSG91 is false, it will always hit this block.
   if (!USE_REAL_MSG91) {
     console.log(`🟡 [MSG91_DEV] Real SMS is disabled globally.`);
-    console.log(`🔑 [MSG91_DEV] SIMULATED OTP for ${formattedMobile} is: 123456`);
+    console.log(`🔑 [MSG91_DEV] SIMULATED OTP for ${formattedMobile} is: 220548`);
     return { type: "success", message: "OTP sent (Simulated)" };
   }
 
@@ -54,10 +54,10 @@ export const verifyOtp = async (mobile: string, otp: string) => {
 
   console.log(`\n🔍 [MSG91_VERIFY] Verifying OTP for: ${formattedMobile}`);
 
-  // 1. DEV MODE: Will always check against '123456'
+  // 1. DEV MODE: Will always check against '220548'
   if (!USE_REAL_MSG91) {
-    console.log(`🟡 [MSG91_DEV] Checking against Magic OTP '123456'`);
-    const isValid = otp === '123456';
+    console.log(`🟡 [MSG91_DEV] Checking against Magic OTP '220548'`);
+    const isValid = otp === '220548';
     console.log(isValid ? `✅ [MSG91_DEV] Matched!` : `❌ [MSG91_DEV] Mismatch! Provided: ${otp}`);
     return isValid;
   }

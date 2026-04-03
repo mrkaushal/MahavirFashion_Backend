@@ -35,7 +35,9 @@ const corsOptions = {
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001',
     'https://mahavir-fashion.vercel.app', // Ensure exact match
-    'https://mahavir-fashion.vercel.app/' 
+    'https://mahavir-fashion.vercel.app/', 
+    'https://mf.shopmahavirfashion.com',    // ⚡ NEW DOMAIN
+    'https://mf.shopmahavirfashion.com/'
   ],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
